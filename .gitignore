@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+runs/
+
+# Unpublished research design docs — keep local until the paper is submitted
+ast-anchored-anomaly-pattern.md
+fusion-design.md
+algorithm-formalization.md
