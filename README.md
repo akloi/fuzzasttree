@@ -342,6 +342,14 @@ attempts, generated responses, backbone retention, accepted/rejected counts and
 operation/kind breakdowns. A missing retention denominator is reported as
 `null`, rather than a measured zero rate.
 
+`--fusion-selector` controls which ranked plans consume those slots. `greedy`
+(the default) keeps pure score order, which lets a few generic statement-level
+pairs dominate every input. `matching` applies greedy b-matching: each emitted
+plan increments per-pattern run-level usage, future plans decay by
+`1/sqrt((1+u1)(1+u2))`, and `--pattern-cap` bounds how many selected plans one
+pattern may join per input — spreading emissions across distinct historical
+patterns while staying deterministic and stateless per plan.
+
 Run the parser, protocol and pipeline tests from the parent repository:
 
 ```bash

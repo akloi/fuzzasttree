@@ -13,7 +13,7 @@ from unittest.mock import patch
 from astsubtree.cli import main as cli_main
 from astsubtree.fusion import (
     build_anchor_interaction_graph, cross_node_plans, group_matches,
-    mechanism_orthogonality, same_node_plans,
+    mechanism_orthogonality, same_node_plans, select_fusion_plans,
 )
 from astsubtree.library import HistoricalLibrary
 from astsubtree.local_model_adapter import LocalModelSnippetMutator, build_fusion_prompt, main as adapter_main
@@ -363,6 +363,50 @@ class FusionTests(unittest.TestCase):
             self.assertIn("void m(Object y)", request["enclosing_context"])
             self.assertIn("class Seed", request["enclosing_context"])
             self.assertNotIn("use((Object)y", request["enclosing_context"])
+
+    def test_matching_selector_decays_repeated_pairs_and_caps_per_file_usage(self):
+        class FakePattern:
+            def __init__(self, bug_id):
+                self.bug_id = bug_id
+
+        class FakeMatch:
+            def __init__(self, bug_id):
+                self.pattern = FakePattern(bug_id)
+
+        class FakePlan:
+            def __init__(self, first, second, score):
+                self.match_1, self.match_2, self.score = FakeMatch(first), FakeMatch(second), score
+
+        plans = [FakePlan("A", "B", 0.9), FakePlan("A", "C", 0.85), FakePlan("D", "E", 0.8)]
+        self.assertEqual([p.match_2.pattern.bug_id for p in select_fusion_plans(plans)], ["B", "C", "E"])
+        # Heavy prior usage of A decays both A-pairs below the fresh D+E pair.
+        decayed = select_fusion_plans(plans, usage={"A": 4})
+        self.assertEqual([p.match_2.pattern.bug_id for p in decayed], ["E", "B", "C"])
+        # A per-file cap of 1 drops the second A-pair entirely.
+        capped = select_fusion_plans(plans, per_file_cap=1)
+        self.assertEqual([(p.match_1.pattern.bug_id, p.match_2.pattern.bug_id) for p in capped], [("A", "B"), ("D", "E")])
+        limited = select_fusion_plans(plans, limit=1)
+        self.assertEqual([p.match_2.pattern.bug_id for p in limited], ["B"])
+        with self.assertRaises(ValueError):
+            PipelineOptions(fusion_selector="bogus")
+        with self.assertRaises(ValueError):
+            PipelineOptions(pattern_cap=-1)
+
+    def test_matching_selector_spreads_pairs_across_inputs_via_run_level_usage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            library = make_library(root, same=True)
+            pipeline = MutationPipeline(library)
+            options = PipelineOptions(fusion="same", max_outputs=1, fusion_budget=1, fusion_selector="matching")
+            emitted = []
+            for index in range(2):
+                seed = root / f"Seed{index}.java"
+                seed.write_text(SAME_SEED)
+                summary = pipeline.mutate_file(seed, root / f"run{index}", HistoricalSnippetMutator(), options)
+                self.assertEqual(summary["fusion_stats"]["accepted"], 1, summary)
+                self.assertEqual(summary["fusion_stats"]["selector"], "matching")
+                emitted.append(tuple(sorted(summary["written"][0]["bug_ids"])))
+            self.assertEqual(pipeline._fusion_usage.get("JDK-cast", 0) + pipeline._fusion_usage.get("JDK-reference", 0), 4)
 
 
 if __name__ == "__main__":

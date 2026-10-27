@@ -255,3 +255,43 @@ def cross_node_plans(tree: JavaSyntaxTree, groups: dict[int, list[MatchResult]],
 
 def plan_sort_key(plan: FusionPlan) -> tuple:
     return (-plan.score, plan.fusion_kind, plan.operation, plan.match_1.pattern.bug_id, plan.match_2.pattern.bug_id, plan.match_1.local_subtree.root_id, plan.match_2.local_subtree.root_id)
+
+
+def select_fusion_plans(
+    plans: list[FusionPlan],
+    *,
+    usage: dict[str, int] | None = None,
+    per_file_cap: int = 0,
+    limit: int | None = None,
+) -> list[FusionPlan]:
+    """Greedy b-matching selection over already-ranked plans.
+
+    Run-level ``usage`` counts how often each pattern has already been emitted;
+    a plan's priority decays by 1/sqrt((1+u1)(1+u2)) so a repeatedly emitted
+    generic pair cannot keep out-scoring fresh combinations. ``per_file_cap``
+    additionally bounds how many selected plans one pattern may join within a
+    single input. Sorts stably over the plan_sort_key order, keeping selection
+    deterministic.
+    """
+    books = dict(usage or {})
+
+    def priority(plan: FusionPlan) -> float:
+        first = plan.match_1.pattern.bug_id
+        second = plan.match_2.pattern.bug_id
+        return -plan.score / math.sqrt((1 + books.get(first, 0)) * (1 + books.get(second, 0)))
+
+    if not per_file_cap and limit is None:
+        return sorted(plans, key=priority)
+    chosen: list[FusionPlan] = []
+    in_file: Counter[str] = Counter()
+    for plan in sorted(plans, key=priority):
+        if limit is not None and len(chosen) >= limit:
+            break
+        first = plan.match_1.pattern.bug_id
+        second = plan.match_2.pattern.bug_id
+        if per_file_cap and (in_file[first] >= per_file_cap or in_file[second] >= per_file_cap):
+            continue
+        chosen.append(plan)
+        in_file[first] += 1
+        in_file[second] += 1
+    return chosen

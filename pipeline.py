@@ -33,6 +33,8 @@ class PipelineOptions:
     anchor_limit: int = 6
     fusion_budget: float = 0.4
     anchor_candidates: int = 3
+    fusion_selector: str = "greedy"
+    pattern_cap: int = 0
 
     def __post_init__(self) -> None:
         if self.fusion not in {"off", "same", "cross", "both"}:
@@ -41,12 +43,19 @@ class PipelineOptions:
             raise ValueError("fusion_pairs, anchor_limit, and anchor_candidates must be positive")
         if not 0 <= self.fusion_budget <= 1:
             raise ValueError("fusion_budget must lie between 0 and 1")
+        if self.fusion_selector not in {"greedy", "matching"}:
+            raise ValueError("fusion_selector must be greedy or matching")
+        if self.pattern_cap < 0:
+            raise ValueError("pattern_cap must not be negative")
 
 
 class MutationPipeline:
     def __init__(self, library: HistoricalLibrary) -> None:
         self.library = library
         self.matcher = SubtreeMatcher(library)
+        # Run-level emission counts per bug id, shared across inputs so the
+        # matching selector can decay repeatedly emitted generic pairs.
+        self._fusion_usage: dict[str, int] = {}
 
     def match_source(self, source: str, source_name: str, options: PipelineOptions) -> tuple[JavaSyntaxTree, list[MatchResult]]:
         tree = parse_java(source, source_name)
@@ -71,7 +80,7 @@ class MutationPipeline:
         options: PipelineOptions,
     ) -> dict[str, object]:
         if options.fusion != "off":
-            return FusionPipeline(self.library).mutate_file(source_path, output_dir, mutator, options)
+            return FusionPipeline(self.library, usage=self._fusion_usage).mutate_file(source_path, output_dir, mutator, options)
         source = source_path.read_text(encoding="utf-8", errors="replace")
         tree, matches = self.match_source(source, source_path.name, options)
         original_error_count = syntax_error_count(tree)
@@ -262,10 +271,15 @@ class MutationPipeline:
 class FusionPipeline(MutationPipeline):
     """Add budgeted fusion outputs while reusing the original single-pattern path."""
 
+    def __init__(self, library: HistoricalLibrary, usage: dict[str, int] | None = None) -> None:
+        super().__init__(library)
+        # Share the parent pipeline's run-level usage unless a fresh one is given.
+        self.usage = usage if usage is not None else self._fusion_usage
+
     def mutate_file(self, source_path: Path, output_dir: Path, mutator: SnippetMutator, options: PipelineOptions) -> dict[str, object]:
         from .fusion import (
             EXCLUDED_ANCHORS, build_anchor_interaction_graph, cross_node_plans,
-            plan_sort_key, same_node_plans,
+            plan_sort_key, same_node_plans, select_fusion_plans,
         )
 
         if options.fusion == "off":
@@ -300,9 +314,11 @@ class FusionPipeline(MutationPipeline):
         if options.fusion in {"cross", "both"}:
             plans.extend(cross_node_plans(tree, groups, edges, options.fusion_pairs, 2 * options.max_host_bytes))
         plans.sort(key=plan_sort_key)
+        if options.fusion_selector == "matching":
+            plans = select_fusion_plans(plans, usage=self.usage, per_file_cap=options.pattern_cap)
         quota = min(max(0, options.max_outputs), math.ceil(max(0, options.max_outputs) * options.fusion_budget))
         stats = {
-            "planned": len(plans), "quota": quota, "attempted": 0, "generated": 0,
+            "planned": len(plans), "quota": quota, "selector": options.fusion_selector, "attempted": 0, "generated": 0,
             "mechanism_checked": 0, "both_mechanisms_preserved": 0, "accepted": 0,
             "rejected": 0, "by_operation": {}, "by_kind": {},
         }
@@ -358,6 +374,8 @@ class FusionPipeline(MutationPipeline):
                 stats["accepted"] += 1
                 bucket["accepted"] += 1
                 kind_bucket["accepted"] += 1
+                self.usage[plan.match_1.pattern.bug_id] = self.usage.get(plan.match_1.pattern.bug_id, 0) + 1
+                self.usage[plan.match_2.pattern.bug_id] = self.usage.get(plan.match_2.pattern.bug_id, 0) + 1
             except (OSError, ValueError, RuntimeError) as exc:
                 stats["rejected"] += 1
                 bucket["rejected"] += 1
