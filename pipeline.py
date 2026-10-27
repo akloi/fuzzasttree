@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
+import math
 from pathlib import Path
 import re
 from typing import Iterable
 
 from .library import HistoricalLibrary
 from .matcher import SubtreeMatcher
-from .models import MatchResult, MutationRequest
-from .mutator import MutationOutput, SnippetMutationError, SnippetMutator, compose_subtree
+from .models import FusionMutationRequest, FusionPlan, MatchResult, MutationRequest
+from .mutator import MutationOutput, SnippetMutationError, SnippetMutator, compose_subtree, compose_two_spans, parse_fusion_output
 from .parser import JavaSyntaxTree, parse_java
 
 
@@ -27,6 +28,18 @@ class PipelineOptions:
     query_language_feature: str = ""
     query_phases: tuple[str, ...] = ()
     query_diagnostic: str = ""
+    fusion: str = "off"
+    fusion_pairs: int = 4
+    anchor_limit: int = 6
+    fusion_budget: float = 0.4
+
+    def __post_init__(self) -> None:
+        if self.fusion not in {"off", "same", "cross", "both"}:
+            raise ValueError("fusion must be off, same, cross, or both")
+        if self.fusion_pairs < 1 or self.anchor_limit < 1:
+            raise ValueError("fusion_pairs and anchor_limit must be positive")
+        if not 0 <= self.fusion_budget <= 1:
+            raise ValueError("fusion_budget must lie between 0 and 1")
 
 
 class MutationPipeline:
@@ -54,6 +67,8 @@ class MutationPipeline:
         mutator: SnippetMutator,
         options: PipelineOptions,
     ) -> dict[str, object]:
+        if options.fusion != "off":
+            return FusionPipeline(self.library).mutate_file(source_path, output_dir, mutator, options)
         source = source_path.read_text(encoding="utf-8", errors="replace")
         tree, matches = self.match_source(source, source_path.name, options)
         original_error_count = syntax_error_count(tree)
@@ -227,6 +242,254 @@ class MutationPipeline:
             encoding="utf-8",
         )
         return summary
+
+
+class FusionPipeline(MutationPipeline):
+    """Add budgeted fusion outputs while reusing the original single-pattern path."""
+
+    def mutate_file(self, source_path: Path, output_dir: Path, mutator: SnippetMutator, options: PipelineOptions) -> dict[str, object]:
+        from .fusion import (
+            EXCLUDED_ANCHORS, build_anchor_interaction_graph, cross_node_plans, group_matches,
+            plan_sort_key, same_node_plans,
+        )
+
+        if options.fusion == "off":
+            return super().mutate_file(source_path, output_dir, mutator, options)
+        source = source_path.read_text(encoding="utf-8", errors="replace")
+        tree, matches = self.match_source(source, source_path.name, options)
+        source_size = max(len(source.encode("utf-8")), 1)
+        eligible = [m for m in matches if (
+            tree.nodes[m.local_subtree.root_id].raw_kind not in EXCLUDED_ANCHORS
+            and m.local_subtree.end_byte > m.local_subtree.start_byte
+            and m.local_subtree.end_byte - m.local_subtree.start_byte <= options.max_host_bytes
+            and (m.local_subtree.end_byte - m.local_subtree.start_byte) / source_size <= options.max_host_fraction
+            and m.final_score >= options.min_score
+        )]
+        groups = group_matches(eligible)
+        edges = build_anchor_interaction_graph(tree, groups, options.anchor_limit) if options.fusion in {"cross", "both"} else []
+        plans = same_node_plans(tree, groups, options.fusion_pairs) if options.fusion in {"same", "both"} else []
+        if options.fusion in {"cross", "both"}:
+            plans.extend(cross_node_plans(tree, groups, edges, options.fusion_pairs, 2 * options.max_host_bytes))
+        plans.sort(key=plan_sort_key)
+        quota = min(max(0, options.max_outputs), math.ceil(max(0, options.max_outputs) * options.fusion_budget))
+        stats = {
+            "planned": len(plans), "quota": quota, "attempted": 0, "generated": 0,
+            "mechanism_checked": 0, "both_mechanisms_preserved": 0, "accepted": 0,
+            "rejected": 0, "by_operation": {}, "by_kind": {},
+        }
+        written, rejected = [], []
+        for rank, plan in enumerate(plans, 1):
+            if len(written) >= quota:
+                break
+            stats["attempted"] += 1
+            bucket = stats["by_operation"].setdefault(plan.operation, {"attempted": 0, "accepted": 0, "rejected": 0})
+            kind_bucket = stats["by_kind"].setdefault(plan.fusion_kind, {"attempted": 0, "accepted": 0, "rejected": 0})
+            bucket["attempted"] += 1
+            kind_bucket["attempted"] += 1
+            validation = None
+            try:
+                request = self._fusion_request(tree, plan)
+                if hasattr(mutator, "mutate_with_trace"):
+                    output = mutator.mutate_with_trace(request)
+                else:
+                    raw = mutator.mutate(request)
+                    one, two = parse_fusion_output(raw, plan.fusion_kind)
+                    output = MutationOutput(one, json.dumps(request.to_dict(), ensure_ascii=False), raw, two)
+                stats["generated"] += 1
+                first = plan.match_1.local_subtree
+                second = plan.match_2.local_subtree
+                spans = [(first.start_byte, first.end_byte)]
+                if plan.fusion_kind == "cross_node":
+                    if not output.replacement_2:
+                        raise SnippetMutationError("cross-node fusion requires both replacements")
+                    spans.append((second.start_byte, second.end_byte))
+                    composed, one, two = compose_two_spans(source, spans[0], spans[1], output.replacement, output.replacement_2)
+                    fragments = [one, two]
+                else:
+                    composed, one = compose_subtree(source, *spans[0], output.replacement)
+                    fragments = [one]
+                if any(tree.snippet(*span).strip() == fragment.strip() for span, fragment in zip(spans, fragments)):
+                    raise SnippetMutationError("fusion must change every selected anchor")
+                regions = replacement_regions(spans, fragments)
+                mutated_tree = parse_java(composed, source_path.name)
+                validation = validate_fusion(tree, mutated_tree, plan, regions)
+                stats["mechanism_checked"] += 1
+                stats["both_mechanisms_preserved"] += int(validation["both_mechanisms_preserved"])
+                if not validation["both_mechanisms_preserved"]:
+                    raise SnippetMutationError("fusion loses a historical mechanism backbone")
+                if not validation["roles_preserved"]:
+                    raise SnippetMutationError("fusion changes a host subtree's syntactic role")
+                if not validation["replacement_syntax_valid"]:
+                    raise SnippetMutationError("fusion replacement contains an erroneous AST node")
+                before, after = syntax_error_count(tree), syntax_error_count(mutated_tree)
+                if not options.allow_new_syntax_errors and after > before:
+                    raise SnippetMutationError(f"composition adds syntax errors ({before} -> {after})")
+                record = self._write_fusion(source_path, output_dir, source, composed, plan, rank, request, output, fragments, regions, validation, type(mutator).__name__)
+                written.append(record)
+                stats["accepted"] += 1
+                bucket["accepted"] += 1
+                kind_bucket["accepted"] += 1
+            except (OSError, ValueError, RuntimeError) as exc:
+                stats["rejected"] += 1
+                bucket["rejected"] += 1
+                kind_bucket["rejected"] += 1
+                rejection = {"bug_ids": [plan.match_1.pattern.bug_id, plan.match_2.pattern.bug_id], "operation": plan.operation, "reason": str(exc)}
+                if validation is not None:
+                    rejection["validation"] = validation
+                rejected.append(rejection)
+        # Failed fusion plans release their output slots back to single-pattern generation.
+        single = super().mutate_file(source_path, output_dir, mutator, replace(options, fusion="off", max_outputs=max(0, options.max_outputs - len(written))))
+        stats["mechanism_retention_rate"] = stats["both_mechanisms_preserved"] / stats["mechanism_checked"] if stats["mechanism_checked"] else None
+        summary = {
+            **single,
+            "written": written + single["written"],
+            "rejected": rejected + single["rejected"],
+            "fusion_stats": stats,
+            "anchor_interaction_graph": {"anchor_ids": sorted(groups, key=lambda n: (-groups[n][0].final_score, n))[:options.anchor_limit] if options.fusion in {"cross", "both"} else [], "edges": [e.to_dict() for e in edges]},
+        }
+        summary_path = output_dir / "summaries" / f"{source_path.stem}.summary.json"
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return summary
+
+    def _request_for_match(self, tree: JavaSyntaxTree, match: MatchResult) -> MutationRequest:
+        material = self.library.reference_material(match.pattern)
+        return MutationRequest(
+            bug_id=match.pattern.bug_id,
+            host_subtree=tree.snippet(match.local_subtree.start_byte, match.local_subtree.end_byte),
+            historical_subtree=material["historical_subtree"],
+            language_feature=match.pattern.language_feature,
+            required_kinds=match.pattern.required_kinds,
+            phases=match.pattern.phases,
+            diagnostic=match.pattern.diagnostic,
+            match_score=match.final_score,
+            historical_summary=material["Summary"],
+            historical_description=material["Description"],
+            historical_source=material["extracted_code"],
+            abstract_raw_kinds=match.pattern.abstract_raw_kinds,
+            abstract_canonical_kinds=match.pattern.abstract_canonical_kinds,
+        )
+
+    def _fusion_request(self, tree: JavaSyntaxTree, plan: FusionPlan) -> FusionMutationRequest:
+        from .fusion import OPERATION_INSTRUCTIONS
+
+        first = self._request_for_match(tree, plan.match_1)
+        second = self._request_for_match(tree, plan.match_2)
+        payload_2 = second.to_dict()
+        pattern_2 = {**payload_2["pattern"], "root_kind": plan.match_2.pattern.signature.get("root_kind", "")}
+        bridge = ""
+        if plan.edge:
+            lca = tree.nodes[plan.edge.evidence["lca_id"]]
+            bridge = tree.snippet(lca.start_byte, lca.end_byte)
+        return FusionMutationRequest(
+            base=first,
+            host_subtree_2=second.host_subtree if plan.fusion_kind == "cross_node" else "",
+            pattern_2=pattern_2,
+            historical_subtree_2=second.historical_subtree,
+            historical_report_2=payload_2["historical_report"],
+            fusion_role=plan.operation,
+            bridging_context=bridge,
+            instruction=OPERATION_INSTRUCTIONS[plan.operation],
+            bug_id_2=second.bug_id,
+            match_score_2=second.match_score,
+            fusion_kind=plan.fusion_kind,
+            edge_evidence=plan.edge.to_dict() if plan.edge else {},
+        )
+
+    @staticmethod
+    def _write_fusion(source_path, output_dir, source, composed, plan, rank, request, output, fragments, regions, validation, strategy):
+        bugs = [plan.match_1.pattern.bug_id, plan.match_2.pattern.bug_id]
+        mutation_id = _result_name(source_path.stem, "+".join(bugs) + "__" + plan.operation, rank)
+        result_dir = output_dir / "mutations" / mutation_id
+        result_dir.mkdir(parents=True, exist_ok=True)
+        codes_dir = output_dir / "codes"
+        codes_dir.mkdir(parents=True, exist_ok=True)
+        candidate_path = codes_dir / f"{mutation_id}.java"
+        candidate_path.write_text(composed, encoding="utf-8")
+        files = {"original": "Original.java", "mutated": "Mutated.java", "prompt": "prompt.txt", "raw_llm_output": "raw_llm_output.txt", "request": "request.json", "match": "match.json", "parse_validation": "parse_validation.json", "fusion_plan": "fusion_plan.json"}
+        for name, text in (("Original.java", source), ("Mutated.java", composed), ("prompt.txt", output.prompt), ("raw_llm_output.txt", output.raw_output)):
+            (result_dir / name).write_text(text, encoding="utf-8")
+        for index, fragment in enumerate(fragments):
+            name = "mutated_subtree.javafrag" if len(fragments) == 1 else f"mutated_subtree_{index + 1}.javafrag"
+            (result_dir / name).write_text(fragment + "\n", encoding="utf-8")
+            files[f"fragment_{index + 1}"] = name
+        evidence = plan.to_dict()
+        evidence["replacement_spans"] = regions
+        evidence["composed_template"] = fragments[0] if len(fragments) == 1 else {"mutated_subtree_1": fragments[0], "mutated_subtree_2": fragments[1]}
+        provenance = {"mutation_id": mutation_id, "seed_path": str(source_path), "historical_bug_ids": bugs, "trace_to_bug_1": bugs[0], "trace_to_bug_2": bugs[1], "fusion_kind": plan.fusion_kind, "operation": plan.operation, "strategy": strategy, "code_file": str(candidate_path), "files": files}
+        payloads = {
+            "request.json": request.to_dict(),
+            "fusion_plan.json": evidence,
+            "parse_validation.json": validation,
+            "match.json": {"pattern_1": plan.match_1.to_dict(source_path), "pattern_2": plan.match_2.to_dict(source_path), "fusion_score": plan.score},
+            "provenance.json": provenance,
+        }
+        for name, payload in payloads.items():
+            (result_dir / name).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return {"mutation_id": mutation_id, "bug_ids": bugs, "score": plan.score, "fusion_kind": plan.fusion_kind, "operation": plan.operation, "mutation_dir": str(result_dir), "code_file": str(candidate_path)}
+
+
+def replacement_regions(spans: list[tuple[int, int]], fragments: list[str]) -> list[tuple[int, int]]:
+    regions = [(0, 0)] * len(spans)
+    shift = 0
+    for index in sorted(range(len(spans)), key=lambda i: spans[i][0]):
+        start, end = spans[index]
+        length = len(fragments[index].encode("utf-8"))
+        regions[index] = (start + shift, start + shift + length)
+        shift += length - (end - start)
+    return regions
+
+
+def validate_fusion(original: JavaSyntaxTree, mutated: JavaSyntaxTree, plan: FusionPlan, regions: list[tuple[int, int]]) -> dict:
+    from .fusion import syntactic_role
+
+    retention, roles = [], []
+    no_errors = True
+    for index, match in enumerate((plan.match_1, plan.match_2)):
+        start, end = regions[index if plan.fusion_kind == "cross_node" else 0]
+        fragment = mutated.snippet(start, end)
+        start += len(fragment[:len(fragment) - len(fragment.lstrip())].encode("utf-8"))
+        end -= len(fragment[len(fragment.rstrip()):].encode("utf-8"))
+        nodes = [n for n in mutated.nodes.values() if n.start_byte >= start and n.end_byte <= end]
+        kinds = {n.raw_kind for n in nodes}
+        required = set(match.pattern.required_kinds)
+        fraction = len(required & kinds) / len(required) if required else 0.0
+        other = plan.match_2 if index == 0 else plan.match_1
+        distinctive = required - set(other.pattern.required_kinds) - {"IDENTIFIER", "MODIFIERS", "BLOCK", "EXPRESSION_STATEMENT", "PARENTHESIZED"}
+        distinctive_present = not distinctive or bool(distinctive & kinds)
+        retention.append({"bug_id": match.pattern.bug_id, "required_kinds": sorted(required), "missing_kinds": sorted(required - kinds), "distinctive_kinds": sorted(distinctive), "distinctive_backbone_present": distinctive_present, "retention": fraction, "preserved": fraction >= 0.6 and distinctive_present})
+        roots = [n for n in nodes if n.start_byte == start and n.end_byte == end]
+        expected_role = syntactic_role(original.nodes[match.local_subtree.root_id].raw_kind)
+        roles.append(any(syntactic_role(n.raw_kind) == expected_role for n in roots))
+        no_errors = no_errors and not bool(kinds & {"ERROR", "ERRONEOUS"})
+    before, after = syntax_error_count(original), syntax_error_count(mutated)
+    return {
+        "parse_ok": after == 0,
+        "syntax_errors_before": before,
+        "syntax_errors_after": after,
+        "new_syntax_errors": max(0, after - before),
+        "mechanism_retention": retention,
+        "both_mechanisms_preserved": all(item["preserved"] for item in retention),
+        "roles_preserved": all(roles),
+        "replacement_syntax_valid": no_errors,
+        "validation_scope": "parse_and_required_kind_backbones",
+        "symbol_resolution": "not_performed",
+    }
+
+
+def aggregate_fusion_stats(summaries: Iterable[dict]) -> dict:
+    totals = {key: 0 for key in ("planned", "quota", "attempted", "generated", "mechanism_checked", "both_mechanisms_preserved", "accepted", "rejected")}
+    totals.update({"by_operation": {}, "by_kind": {}})
+    for summary in summaries:
+        stats = summary.get("fusion_stats", {})
+        for key in ("planned", "quota", "attempted", "generated", "mechanism_checked", "both_mechanisms_preserved", "accepted", "rejected"):
+            totals[key] += stats.get(key, 0)
+        for grouping in ("by_operation", "by_kind"):
+            for name, counts in stats.get(grouping, {}).items():
+                bucket = totals[grouping].setdefault(name, {"attempted": 0, "accepted": 0, "rejected": 0})
+                for key in bucket:
+                    bucket[key] += counts[key]
+    totals["mechanism_retention_rate"] = totals["both_mechanisms_preserved"] / totals["mechanism_checked"] if totals["mechanism_checked"] else None
+    return totals
 
 
 def syntax_error_count(tree: JavaSyntaxTree) -> int:

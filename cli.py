@@ -13,7 +13,7 @@ from .evaluation import evaluate_manifest
 from .library import DEFAULT_HISTORICAL_SOURCE_DIR, DEFAULT_LIBRARY_DIR, HistoricalLibrary
 from .local_model_adapter import LocalModelSnippetMutator
 from .mutator import CommandSnippetMutator, HistoricalSnippetMutator, OpenAICompatibleSnippetMutator
-from .pipeline import MutationPipeline, PipelineOptions, java_inputs
+from .pipeline import MutationPipeline, PipelineOptions, aggregate_fusion_stats, java_inputs
 
 
 DEFAULT_RUNS_DIR = Path(__file__).resolve().parent / "runs"
@@ -60,8 +60,26 @@ def build_parser() -> argparse.ArgumentParser:
     mutate.add_argument("--max-host-bytes", type=int, default=4000)
     mutate.add_argument("--max-host-fraction", type=float, default=0.75)
     mutate.add_argument("--allow-new-syntax-errors", action="store_true")
+    mutate.add_argument("--fusion", choices=("off", "same", "cross", "both"), default="off")
+    mutate.add_argument("--fusion-pairs", type=_positive_int, default=4, help="Keep this many plans per anchor or interaction edge.")
+    mutate.add_argument("--anchor-limit", type=_positive_int, default=6, help="Maximum number of cross-node graph vertices.")
+    mutate.add_argument("--fusion-budget", type=_fraction, default=0.4, help="Fusion share of max-outputs, rounded up; failed slots return to single-pattern generation.")
     _add_match_options(mutate)
     return parser
+
+
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be positive")
+    return number
+
+
+def _fraction(value: str) -> float:
+    number = float(value)
+    if not 0 <= number <= 1:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return number
 
 
 def _add_match_options(parser: argparse.ArgumentParser) -> None:
@@ -106,6 +124,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_host_bytes=getattr(args, "max_host_bytes", 4000),
         max_host_fraction=getattr(args, "max_host_fraction", 0.75),
         allow_new_syntax_errors=getattr(args, "allow_new_syntax_errors", False),
+        fusion=getattr(args, "fusion", "off"),
+        fusion_pairs=getattr(args, "fusion_pairs", 4),
+        anchor_limit=getattr(args, "anchor_limit", 6),
+        fusion_budget=getattr(args, "fusion_budget", 0.4),
     )
     pipeline = MutationPipeline(library)
     if args.command == "match":
@@ -171,6 +193,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "written_count": sum(len(item["written"]) for item in summaries),
         "inputs": summaries,
     }
+    if options.fusion != "off":
+        run_summary["fusion_stats"] = aggregate_fusion_stats(summaries)
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "run_summary.json").write_text(
         json.dumps(run_summary, ensure_ascii=False, indent=2) + "\n",

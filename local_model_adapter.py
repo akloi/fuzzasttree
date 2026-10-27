@@ -12,7 +12,7 @@ import sys
 from typing import Any, Callable, TextIO
 
 from .local_generator import LocalGenerator
-from .mutator import MutationOutput
+from .mutator import MutationOutput, parse_fusion_output
 
 
 def build_subtree_prompt(request: dict[str, Any]) -> str:
@@ -52,6 +52,33 @@ def build_subtree_prompt(request: dict[str, Any]) -> str:
         "replacement Java subtree. Do not return imports, a surrounding class, a complete Java file, "
         "Markdown, or an explanation.\n\n"
         "Mutation request:\n"
+        + json.dumps(payload, ensure_ascii=False, indent=2)
+    )
+
+
+def build_fusion_prompt(request: dict[str, Any]) -> str:
+    """The v2 payload contains two historical patterns and only local host context."""
+    fields = (
+        "protocol_version", "fusion_kind", "fusion_role", "instruction", "bug_id_1", "bug_id_2",
+        "host_subtree_1", "host_subtree_2", "pattern_1", "pattern_2",
+        "historical_subtree_1", "historical_subtree_2", "historical_report_1", "historical_report_2",
+        "match_score_1", "match_score_2", "bridging_context", "edge_evidence",
+    )
+    payload = {key: request[key] for key in fields if key in request}
+    if not payload.get("host_subtree_1") or not payload.get("historical_subtree_1") or not payload.get("historical_subtree_2"):
+        raise ValueError("fusion request requires the host and both historical snippets")
+    cross = request.get("fusion_kind") == "cross_node"
+    if cross and not payload.get("host_subtree_2"):
+        raise ValueError("cross-node fusion requires host_subtree_2")
+    output = '{"mutated_subtree_1": "...", "mutated_subtree_2": "..."}' if cross else '{"mutated_subtree": "..."}'
+    return (
+        "You fuse TWO historical javac anomaly patterns into one host context.\n"
+        "Keep BOTH anomaly mechanisms recognizable. Preserve each host subtree's syntactic role. "
+        "Adapt identifiers and types to the supplied hosts and bridging context. "
+        "Follow fusion_role and its directed instruction; preserve the interaction edge.\n"
+        f"Return exactly one JSON object shaped as {output}. "
+        "Each value contains only replacement Java subtree code. Return no imports, complete file, "
+        "Markdown, or explanation.\n\nFusion request:\n"
         + json.dumps(payload, ensure_ascii=False, indent=2)
     )
 
@@ -129,7 +156,8 @@ def load_local_generator(
 
 
 def _mutate_with_trace(generator: Any, request: dict[str, Any]) -> MutationOutput:
-    prompt = build_subtree_prompt(request)
+    fusion_kind = request.get("fusion_kind")
+    prompt = build_fusion_prompt(request) if fusion_kind else build_subtree_prompt(request)
     tokenizer = getattr(generator, "tokenizer", None)
     if tokenizer is not None and getattr(tokenizer, "chat_template", None):
         prompt = tokenizer.apply_chat_template(
@@ -141,10 +169,12 @@ def _mutate_with_trace(generator: Any, request: dict[str, Any]) -> MutationOutpu
     if not outputs or outputs[0] is None:
         raise RuntimeError("local model did not produce an output")
     raw_output = str(outputs[0])
+    replacement, replacement_2 = parse_fusion_output(raw_output, fusion_kind) if fusion_kind else (parse_model_output(raw_output), None)
     return MutationOutput(
-        replacement=parse_model_output(raw_output),
+        replacement=replacement,
         prompt=prompt,
         raw_output=raw_output,
+        replacement_2=replacement_2,
     )
 
 
@@ -223,8 +253,11 @@ def main(
         # Model implementations may log with print; stdout is the JSON protocol channel.
         with redirect_stdout(error_stream):
             generator = generator_factory(args)
-            mutated_subtree = _mutate(generator, request)
-        json.dump({"mutated_subtree": mutated_subtree}, output_stream, ensure_ascii=False)
+            result = _mutate_with_trace(generator, request)
+        payload = {"mutated_subtree": result.replacement}
+        if result.replacement_2 is not None:
+            payload = {"mutated_subtree_1": result.replacement, "mutated_subtree_2": result.replacement_2}
+        json.dump(payload, output_stream, ensure_ascii=False)
         output_stream.write("\n")
         output_stream.flush()
         return 0

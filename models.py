@@ -164,3 +164,90 @@ class MutationRequest:
             ),
         }
 
+
+@dataclass(slots=True)
+class AnchorEdge:
+    edge_type: str
+    source_id: int
+    target_id: int
+    strength: float
+    evidence: dict[str, Any]
+    phase: int = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "edge_type": self.edge_type,
+            "source_id": self.source_id,
+            "target_id": self.target_id,
+            "strength": self.strength,
+            "evidence": self.evidence,
+            "phase": self.phase,
+        }
+
+
+@dataclass(slots=True)
+class FusionPlan:
+    fusion_kind: str
+    operation: str
+    match_1: MatchResult
+    match_2: MatchResult
+    edge: AnchorEdge | None
+    score: float
+    components: dict[str, float]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "fusion_kind": self.fusion_kind,
+            "operation": self.operation,
+            "score": self.score,
+            "score_components": self.components,
+            "trace_to_bug_1": self.match_1.pattern.bug_id,
+            "trace_to_bug_2": self.match_2.pattern.bug_id,
+            "anchor_1": self.match_1.to_dict(),
+            "anchor_2": self.match_2.to_dict(),
+            "interaction_edge": self.edge.to_dict() if self.edge else None,
+            "edit_operation_1": "replace_subtree",
+            "edit_operation_2": "fuse_into_anchor_1" if self.fusion_kind == "same_node" else "replace_subtree",
+            "binding_constraints": ["preserve_host_syntactic_roles", "retain_both_pattern_backbones"],
+        }
+
+
+@dataclass(slots=True)
+class FusionMutationRequest:
+    base: MutationRequest
+    host_subtree_2: str
+    pattern_2: dict[str, Any]
+    historical_subtree_2: str
+    historical_report_2: dict[str, str]
+    fusion_role: str
+    bridging_context: str
+    instruction: str
+    bug_id_2: str
+    match_score_2: float
+    fusion_kind: str = "same_node"
+    edge_evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = self.base.to_dict()
+        payload.update({
+            "protocol_version": 2,
+            "fusion_kind": self.fusion_kind,
+            "host_subtree_1": self.base.host_subtree,
+            "host_subtree_2": self.host_subtree_2,
+            "pattern_1": payload["pattern"],
+            "pattern_2": self.pattern_2,
+            "historical_subtree_1": self.base.historical_subtree,
+            "historical_subtree_2": self.historical_subtree_2,
+            "historical_report_1": payload["historical_report"],
+            "historical_report_2": self.historical_report_2,
+            "bug_id_1": self.base.bug_id,
+            "bug_id_2": self.bug_id_2,
+            "match_score_1": self.base.match_score,
+            "match_score_2": self.match_score_2,
+            "fusion_role": self.fusion_role,
+            "bridging_context": self.bridging_context,
+            "edge_evidence": self.edge_evidence,
+            "instruction": self.instruction,
+        })
+        return payload
+

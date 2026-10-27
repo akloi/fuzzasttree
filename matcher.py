@@ -225,6 +225,13 @@ class SubtreeMatcher:
         results.sort(key=lambda item: (-item.final_score, item.pattern.bug_id))
         return results[:top_k] if top_k > 0 else results
 
+    def match_anchors(self, tree: JavaSyntaxTree, **options: Any) -> dict[int, list[MatchResult]]:
+        """A reverse view of the existing best-anchor-per-pattern retrieval."""
+        groups: dict[int, list[MatchResult]] = defaultdict(list)
+        for match in self.match(tree, **options):
+            groups[match.local_subtree.root_id].append(match)
+        return dict(groups)
+
 
 def locate_local_subtree(tree: JavaSyntaxTree, pattern: HistoricalPattern) -> LocalSubtree | None:
     required = tuple(dict.fromkeys(pattern.required_kinds))

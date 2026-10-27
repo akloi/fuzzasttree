@@ -250,6 +250,90 @@ run_.../
 
 By default, a mutation is rejected if it introduces additional parser errors, covers the entire compilation unit, replaces more than 4000 host bytes, or spans more than 75% of the input file. The corresponding limits can be changed with `--allow-new-syntax-errors`, `--max-host-bytes`, and `--max-host-fraction`.
 
+## Two-pattern fusion
+
+Fusion is opt-in. `--fusion off` keeps the original single-pattern behavior.
+
+```bash
+PYTHONPATH=ast_mutation python -m astsubtree mutate path/to/Seed.java \
+  --strategy historical \
+  --fusion both \
+  --fusion-pairs 4 \
+  --anchor-limit 6 \
+  --fusion-budget 0.4 \
+  --max-outputs 5 \
+  --output-dir ast_mutation/astsubtree/runs/fusion
+```
+
+Use `same` for two patterns on one anchor, `cross` for two interacting anchors, or
+`both` to rank both kinds together. The same options work with `local`, `openai`,
+and `command`. Each model call handles one complete fusion plan.
+
+Same-anchor plans support `wrapper`, `role_extension`, `constraint_conjunction`,
+`branch_splitting`, and `nested_expression`. A role table filters candidates;
+ranking combines geometric-mean match quality, structural non-conflict,
+feature compatibility, phase/edge/diagnostic orthogonality, and operation priors.
+The historical baseline uses AST wrapper/argument slots and conditional
+expressions, while model providers receive the directed operation and both
+historical reports. Templates that lack an appropriate AST slot are rejected.
+
+The phase-one Anchor Interaction Graph records `ancestor_descendant`, `sibling`,
+and `control_flow` edges with node IDs, LCA/slot/branch evidence and strengths.
+Cross-anchor plans use disjoint replacements and combine interaction strength,
+feature compatibility, mechanism orthogonality and scope/distance priors.
+Ancestor/descendant subtrees overlap, so their edges are recorded with
+`execution_exclusion: overlapping_anchor_spans` and are not scheduled as two-span
+edits. Nested transformations use same-anchor wrapper/nesting operations.
+Name-based dataflow and attributed type/symbol edges belong to later phases.
+
+The v2 request retains the original first-pattern fields and adds
+`host_subtree_1/2`, `pattern_1/2`, `historical_subtree_1/2`,
+`historical_report_1/2`, both bug IDs and match scores, `fusion_role`,
+`edge_evidence`, and `bridging_context`. The latter is the LCA source snippet,
+bounded by twice `--max-host-bytes`; plans requiring a larger bridge or the
+complete host file are excluded. Historical reports can contain complete
+historical reproducers.
+
+For same-anchor fusion, return:
+
+```json
+{"mutated_subtree": "replacement Java subtree"}
+```
+
+For cross-anchor fusion, return both snippets in one response:
+
+```json
+{"mutated_subtree_1": "first replacement", "mutated_subtree_2": "second replacement"}
+```
+
+The composer applies disjoint UTF-8 spans from right to left. Validation reparses
+the complete result, checks each replacement's syntactic role, and requires at
+least 60% of each pattern's required node kinds within its replacement region.
+When a pattern has distinctive non-scaffolding kinds, at least one must survive;
+shared identifiers alone cannot establish two-mechanism retention. Every
+selected anchor must change. These are syntax/backbone checks; symbol binding,
+full type checking and actual bug reproduction are measured downstream.
+
+Each accepted fusion adds `fusion_plan.json`, with both bug traces, both match
+signatures, operation/edge evidence, score components, replacement spans and the
+composed template. Cross-anchor results save `mutated_subtree_1.javafrag` and
+`mutated_subtree_2.javafrag`; prompt, raw output, request, validation, source and
+provenance files follow the existing layout. Per-input summaries also preserve
+the interaction graph and failed-plan validation details.
+
+Fusion reserves `ceil(max_outputs * fusion_budget)` output slots. Failed fusion
+slots return to single-pattern generation, and the total output count remains
+bounded by `max_outputs`. `run_summary.json` aggregates `fusion_stats`: plans,
+attempts, generated responses, backbone retention, accepted/rejected counts and
+operation/kind breakdowns. A missing retention denominator is reported as
+`null`, rather than a measured zero rate.
+
+Run the parser, protocol and pipeline tests from the parent repository:
+
+```bash
+PYTHONPATH=ast_mutation python -m unittest discover -s ast_mutation/astsubtree/tests -v
+```
+
 ## Experimental use
 
 For an initial retrieval experiment:
