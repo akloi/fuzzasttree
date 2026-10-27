@@ -175,85 +175,170 @@ class SubtreeMatcher:
         query_language_feature: str = "",
         query_phases: Iterable[str] = (),
         query_diagnostic: str = "",
+        max_span_bytes: int = 0,
+        max_span_fraction: float = 0.0,
     ) -> list[MatchResult]:
         results: list[MatchResult] = []
         phases = tuple(query_phases)
-        has_context = bool(query_language_feature.strip() or phases or query_diagnostic.strip())
         for pattern, prefilter_score in self.prefilter(tree, prefilter_limit):
             local = locate_local_subtree(tree, pattern)
-            if local is None:
+            if local is None or not span_allowed(tree, local, max_span_bytes, max_span_fraction):
                 continue
-            components = structural_components(pattern, local)
-            structural_score = sum(STRUCTURAL_WEIGHTS[key] * components[key] for key in STRUCTURAL_WEIGHTS)
-            context_score = semantic_context_score(
+            result = score_match(
+                tree,
                 pattern,
+                local,
+                prefilter_score,
                 language_feature=query_language_feature,
                 phases=phases,
                 diagnostic=query_diagnostic,
             )
-            quality_score = reference_quality(pattern)
-            specificity_score = reference_specificity(pattern)
-            feature_score, feature_evidence = feature_compatibility_score(tree, pattern, local)
-            if has_context:
-                raw_score = (
-                    0.10 * prefilter_score
-                    + 0.60 * structural_score
-                    + 0.15 * feature_score
-                    + 0.15 * context_score
-                )
-            else:
-                raw_score = 0.15 * prefilter_score + 0.70 * structural_score + 0.15 * feature_score
-            final_score = raw_score * (0.75 + 0.25 * quality_score) * specificity_score
-            final_score = max(0.0, min(1.0, final_score))
-            if final_score < min_score:
+            if result is None or result.final_score < min_score:
                 continue
-            components["semantic_context"] = context_score
-            components["feature_compatibility"] = feature_score
-            results.append(
-                MatchResult(
-                    pattern=pattern,
-                    local_subtree=local,
-                    prefilter_score=prefilter_score,
-                    structural_score=structural_score,
-                    quality_score=quality_score,
-                    specificity_score=specificity_score,
-                    final_score=final_score,
-                    components=components,
-                    feature_evidence=feature_evidence,
-                )
-            )
+            results.append(result)
         results.sort(key=lambda item: (-item.final_score, item.pattern.bug_id))
         return results[:top_k] if top_k > 0 else results
 
-    def match_anchors(self, tree: JavaSyntaxTree, **options: Any) -> dict[int, list[MatchResult]]:
-        """A reverse view of the existing best-anchor-per-pattern retrieval."""
+    def match_anchors(
+        self,
+        tree: JavaSyntaxTree,
+        *,
+        candidates_per_pattern: int = 3,
+        prefilter_limit: int = 200,
+        top_k: int = 20,
+        min_score: float = 0.0,
+        query_language_feature: str = "",
+        query_phases: Iterable[str] = (),
+        query_diagnostic: str = "",
+        max_span_bytes: int = 0,
+        max_span_fraction: float = 0.0,
+    ) -> dict[int, list[MatchResult]]:
+        """Group per-pattern candidate anchors for same-node and cross-node pairing.
+
+        Unlike match(), every pattern may report several distinct anchors, so two
+        patterns can be paired on one anchor (principle 9) or on interacting
+        anchors (principle 10) even when their best anchors differ.
+        """
         groups: dict[int, list[MatchResult]] = defaultdict(list)
-        for match in self.match(tree, **options):
-            groups[match.local_subtree.root_id].append(match)
+        phases = tuple(query_phases)
+        for pattern, prefilter_score in self.prefilter(tree, prefilter_limit):
+            for local in locate_local_subtrees(tree, pattern, candidates_per_pattern):
+                if not span_allowed(tree, local, max_span_bytes, max_span_fraction):
+                    continue
+                result = score_match(
+                    tree,
+                    pattern,
+                    local,
+                    prefilter_score,
+                    language_feature=query_language_feature,
+                    phases=phases,
+                    diagnostic=query_diagnostic,
+                )
+                if result is None or result.final_score < min_score:
+                    continue
+                groups[local.root_id].append(result)
+        for group in groups.values():
+            group.sort(key=lambda item: (-item.final_score, item.pattern.bug_id))
+        if top_k > 0:
+            groups = {root: group[:top_k] for root, group in groups.items()}
         return dict(groups)
 
 
-def locate_local_subtree(tree: JavaSyntaxTree, pattern: HistoricalPattern) -> LocalSubtree | None:
+def span_allowed(
+    tree: JavaSyntaxTree,
+    local: LocalSubtree,
+    max_span_bytes: int = 0,
+    max_span_fraction: float = 0.0,
+) -> bool:
+    """Apply the pipeline's host-size gates before anchors consume top-k slots."""
+    span = local.end_byte - local.start_byte
+    if max_span_bytes and span > max_span_bytes:
+        return False
+    if max_span_fraction:
+        total = max(len(tree.source_bytes), 1)
+        if span / total > max_span_fraction:
+            return False
+    return True
+
+
+def score_match(
+    tree: JavaSyntaxTree,
+    pattern: HistoricalPattern,
+    local: LocalSubtree,
+    prefilter_score: float,
+    *,
+    language_feature: str,
+    phases: tuple[str, ...],
+    diagnostic: str,
+) -> MatchResult | None:
+    components = structural_components(pattern, local)
+    structural_score = sum(STRUCTURAL_WEIGHTS[key] * components[key] for key in STRUCTURAL_WEIGHTS)
+    context_score = semantic_context_score(
+        pattern,
+        language_feature=language_feature,
+        phases=phases,
+        diagnostic=diagnostic,
+    )
+    quality_score = reference_quality(pattern)
+    specificity_score = reference_specificity(pattern)
+    feature_score, feature_evidence = feature_compatibility_score(tree, pattern, local)
+    if language_feature.strip() or phases or diagnostic.strip():
+        raw_score = (
+            0.10 * prefilter_score
+            + 0.60 * structural_score
+            + 0.15 * feature_score
+            + 0.15 * context_score
+        )
+    else:
+        raw_score = 0.15 * prefilter_score + 0.70 * structural_score + 0.15 * feature_score
+    final_score = raw_score * (0.75 + 0.25 * quality_score) * specificity_score
+    final_score = max(0.0, min(1.0, final_score))
+    components["semantic_context"] = context_score
+    components["feature_compatibility"] = feature_score
+    return MatchResult(
+        pattern=pattern,
+        local_subtree=local,
+        prefilter_score=prefilter_score,
+        structural_score=structural_score,
+        quality_score=quality_score,
+        specificity_score=specificity_score,
+        final_score=final_score,
+        components=components,
+        feature_evidence=feature_evidence,
+    )
+
+
+def locate_local_subtrees(
+    tree: JavaSyntaxTree,
+    pattern: HistoricalPattern,
+    count: int = 1,
+) -> list[LocalSubtree]:
+    """Return up to ``count`` ranked anchor subtrees for one pattern.
+
+    Candidates keep the historical preference order (coverage, root-kind match,
+    size proximity, span); taking several lets a second pattern anchor on a
+    different node than the pattern's single best anchor.
+    """
     required = tuple(dict.fromkeys(pattern.required_kinds))
     reference_counts = Counter(
         {
-            str(kind): int(count)
-            for kind, count in (pattern.signature.get("node_kind_multiset") or {}).items()
-            if int(count) > 0
+            str(kind): int(count_)
+            for kind, count_ in (pattern.signature.get("node_kind_multiset") or {}).items()
+            if int(count_) > 0
         }
     )
     if not reference_counts:
         reference_counts.update(required)
     occurrences = {kind: tree.occurrences(kind) for kind in reference_counts}
     present_ids = [node_id for values in occurrences.values() for node_id in values]
-    if not present_ids:
-        return None
+    if not present_ids or count < 1:
+        return []
 
     ancestor_paths = {node_id: tree.ancestors(node_id) for node_id in set(present_ids)}
     ancestor_sets = {node_id: set(path) for node_id, path in ancestor_paths.items()}
     root_candidates = {ancestor for path in ancestor_paths.values() for ancestor in path}
     historical_root = str(pattern.signature.get("root_kind") or "")
-    best: tuple[tuple[Any, ...], int, set[int], set[str]] | None = None
+    candidates: list[tuple[tuple[Any, ...], int, set[int], set[str]]] = []
 
     for root_id in root_candidates:
         node = tree.nodes[root_id]
@@ -290,26 +375,41 @@ def locate_local_subtree(tree: JavaSyntaxTree, pattern: HistoricalPattern) -> Lo
             len(selected),
             node.end_byte - node.start_byte,
             node.start_byte,
+            root_id,
         )
-        if best is None or key < best[0]:
-            best = (key, root_id, selected, covered)
+        candidates.append((key, root_id, selected, covered))
 
-    if best is None:
-        return None
-    _key, root_id, selected, covered = best
-    signature = make_query_signature(tree, root_id, selected, required, historical_root)
-    ancestor_path = tuple(tree.nodes[node_id].raw_kind for node_id in tree.ancestors(root_id))
-    root = tree.nodes[root_id]
-    return LocalSubtree(
-        root_id=root_id,
-        selected_ids=tuple(sorted(selected, key=lambda item: (tree.nodes[item].start_byte, item))),
-        covered_kinds=tuple(kind for kind in required if kind in covered),
-        missing_kinds=tuple(kind for kind in required if kind not in covered),
-        signature=signature,
-        ancestor_path=ancestor_path,
-        start_byte=root.start_byte,
-        end_byte=root.end_byte,
-    )
+    candidates.sort(key=lambda item: item[0])
+    subtrees: list[LocalSubtree] = []
+    seen_roots: set[int] = set()
+    for _key, root_id, selected, covered in candidates:
+        if len(subtrees) >= count:
+            break
+        if root_id in seen_roots:
+            continue
+        seen_roots.add(root_id)
+        signature = make_query_signature(tree, root_id, selected, required, historical_root)
+        ancestor_path = tuple(tree.nodes[node_id].raw_kind for node_id in tree.ancestors(root_id))
+        root = tree.nodes[root_id]
+        subtrees.append(
+            LocalSubtree(
+                root_id=root_id,
+                selected_ids=tuple(sorted(selected, key=lambda item: (tree.nodes[item].start_byte, item))),
+                covered_kinds=tuple(kind for kind in required if kind in covered),
+                missing_kinds=tuple(kind for kind in required if kind not in covered),
+                signature=signature,
+                ancestor_path=ancestor_path,
+                start_byte=root.start_byte,
+                end_byte=root.end_byte,
+            )
+        )
+    return subtrees
+
+
+def locate_local_subtree(tree: JavaSyntaxTree, pattern: HistoricalPattern) -> LocalSubtree | None:
+    """Backward-compatible single-best-anchor view of locate_local_subtrees."""
+    subtrees = locate_local_subtrees(tree, pattern, count=1)
+    return subtrees[0] if subtrees else None
 
 
 def _align_reference_subtree(

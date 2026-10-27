@@ -64,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     mutate.add_argument("--fusion-pairs", type=_positive_int, default=4, help="Keep this many plans per anchor or interaction edge.")
     mutate.add_argument("--anchor-limit", type=_positive_int, default=6, help="Maximum number of cross-node graph vertices.")
     mutate.add_argument("--fusion-budget", type=_fraction, default=0.4, help="Fusion share of max-outputs, rounded up; failed slots return to single-pattern generation.")
+    mutate.add_argument("--anchor-candidates", type=_positive_int, default=3, help="Candidate anchors reported per pattern for fusion grouping.")
     _add_match_options(mutate)
     return parser
 
@@ -128,6 +129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         fusion_pairs=getattr(args, "fusion_pairs", 4),
         anchor_limit=getattr(args, "anchor_limit", 6),
         fusion_budget=getattr(args, "fusion_budget", 0.4),
+        anchor_candidates=getattr(args, "anchor_candidates", 3),
     )
     pipeline = MutationPipeline(library)
     if args.command == "match":

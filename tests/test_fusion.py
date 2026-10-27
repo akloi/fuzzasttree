@@ -17,7 +17,7 @@ from astsubtree.fusion import (
 )
 from astsubtree.library import HistoricalLibrary
 from astsubtree.local_model_adapter import LocalModelSnippetMutator, build_fusion_prompt, main as adapter_main
-from astsubtree.matcher import SubtreeMatcher
+from astsubtree.matcher import SubtreeMatcher, locate_local_subtrees, locate_local_subtree
 from astsubtree.models import FusionMutationRequest, MutationRequest
 from astsubtree.mutator import (
     CommandSnippetMutator, HistoricalSnippetMutator, MutationOutput,
@@ -313,6 +313,56 @@ class FusionTests(unittest.TestCase):
             self.assertEqual(summary["written_count"], 2)
             self.assertEqual(set(summary["fusion_stats"]["by_operation"]), {"sibling", "control_flow"})
             self.assertEqual(len(json.loads((output / "report.json").read_text())["mutations"]), 2)
+
+    def test_anchor_candidates_and_span_prefilter_shape_the_fusion_groups(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            library = make_library(root)
+            matcher = SubtreeMatcher(library)
+            tree = parse_java(CROSS_SEED)
+            pattern = library.patterns["JDK-cast"]
+            candidates = locate_local_subtrees(tree, pattern, 3)
+            self.assertGreaterEqual(len(candidates), 2)
+            self.assertEqual(len({c.root_id for c in candidates}), len(candidates))
+            self.assertEqual(candidates[0].root_id, locate_local_subtree(tree, pattern).root_id)
+            groups = matcher.match_anchors(tree, candidates_per_pattern=2)
+            self.assertGreaterEqual(len(groups), 2)
+            for group in groups.values():
+                self.assertLessEqual(len(group), len(library.patterns))
+            # Host-size gates applied inside the matcher free top-k slots instead of
+            # burning pipeline rejections on anchors that can never be composed.
+            self.assertEqual(matcher.match_anchors(tree, max_span_bytes=1), {})
+            self.assertEqual(matcher.match(tree, max_span_fraction=0.001), [])
+
+    def test_single_pattern_outputs_must_retain_the_pattern_backbone(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            library = make_library(root)
+            seed = root / "Seed.java"
+            seed.write_text(CROSS_SEED)
+
+            class TrivializingMutator:
+                def mutate_with_trace(self, request):
+                    return MutationOutput("null", "prompt", "raw")
+
+            summary = MutationPipeline(library).mutate_file(seed, root / "run", TrivializingMutator(), PipelineOptions(max_outputs=1))
+            self.assertEqual(len(summary["written"]), 0)
+            self.assertTrue(any("mechanism backbone" in r["reason"] for r in summary["rejected"]))
+            reasons = {r["reason"] for r in summary["rejected"]}
+            self.assertTrue(all("backbone" in reason or "syntax" in reason for reason in reasons), reasons)
+
+    def test_requests_carry_an_enclosing_signature_skeleton(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            library = make_library(root)
+            seed = root / "Seed.java"
+            seed.write_text(CROSS_SEED)
+            summary = MutationPipeline(library).mutate_file(seed, root / "run", HistoricalSnippetMutator(), PipelineOptions(max_outputs=1))
+            self.assertEqual(len(summary["written"]), 1)
+            request = json.loads((Path(summary["written"][0]["mutation_dir"]) / "request.json").read_text())
+            self.assertIn("void m(Object y)", request["enclosing_context"])
+            self.assertIn("class Seed", request["enclosing_context"])
+            self.assertNotIn("use((Object)y", request["enclosing_context"])
 
 
 if __name__ == "__main__":

@@ -138,6 +138,7 @@ class MutationRequest:
     historical_source: str = ""
     abstract_raw_kinds: tuple[str, ...] = ()
     abstract_canonical_kinds: tuple[str, ...] = ()
+    enclosing_context: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -158,9 +159,11 @@ class MutationRequest:
                 "extracted_code": self.historical_source,
             },
             "match_score": round(self.match_score, 6),
+            "enclosing_context": self.enclosing_context,
             "instruction": (
                 "Return only a mutated replacement for host_subtree. Preserve its syntactic role and "
-                "introduce the historical anomaly structure. Do not return a complete Java file."
+                "introduce the historical anomaly structure. Use enclosing_context (nearby declared "
+                "signatures) only to adapt identifiers and types. Do not return a complete Java file."
             ),
         }
 

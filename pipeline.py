@@ -32,12 +32,13 @@ class PipelineOptions:
     fusion_pairs: int = 4
     anchor_limit: int = 6
     fusion_budget: float = 0.4
+    anchor_candidates: int = 3
 
     def __post_init__(self) -> None:
         if self.fusion not in {"off", "same", "cross", "both"}:
             raise ValueError("fusion must be off, same, cross, or both")
-        if self.fusion_pairs < 1 or self.anchor_limit < 1:
-            raise ValueError("fusion_pairs and anchor_limit must be positive")
+        if self.fusion_pairs < 1 or self.anchor_limit < 1 or self.anchor_candidates < 1:
+            raise ValueError("fusion_pairs, anchor_limit, and anchor_candidates must be positive")
         if not 0 <= self.fusion_budget <= 1:
             raise ValueError("fusion_budget must lie between 0 and 1")
 
@@ -57,6 +58,8 @@ class MutationPipeline:
             query_language_feature=options.query_language_feature,
             query_phases=options.query_phases,
             query_diagnostic=options.query_diagnostic,
+            max_span_bytes=options.max_host_bytes,
+            max_span_fraction=options.max_host_fraction,
         )
         return tree, matches
 
@@ -121,6 +124,7 @@ class MutationPipeline:
                     historical_source=historical_material["extracted_code"],
                     abstract_raw_kinds=match.pattern.abstract_raw_kinds,
                     abstract_canonical_kinds=match.pattern.abstract_canonical_kinds,
+                    enclosing_context=enclosing_skeleton(tree, match.local_subtree.root_id),
                 )
                 if hasattr(mutator, "mutate_with_trace"):
                     mutation_output = mutator.mutate_with_trace(request)
@@ -142,6 +146,14 @@ class MutationPipeline:
                 if not options.allow_new_syntax_errors and new_error_count > original_error_count:
                     raise SnippetMutationError(
                         f"composition adds syntax errors ({original_error_count} -> {new_error_count})"
+                    )
+                replacement_start = match.local_subtree.start_byte
+                replacement_region = (replacement_start, replacement_start + len(normalized_replacement.encode("utf-8")))
+                mechanism = mechanism_retention(mutated_tree, replacement_region, match.pattern.required_kinds)
+                if not mechanism["preserved"]:
+                    raise SnippetMutationError(
+                        "mutation loses the historical mechanism backbone "
+                        f"({mechanism['backbone_check']}, retention={mechanism['retention']:.2f})"
                     )
                 mutation_id = _result_name(source_path.stem, match.pattern.bug_id, rank)
                 result_dir = mutations_dir / mutation_id
@@ -192,6 +204,9 @@ class MutationPipeline:
                     "syntax_errors_before": original_error_count,
                     "syntax_errors_after": new_error_count,
                     "new_syntax_errors": max(new_error_count - original_error_count, 0),
+                    "mechanism_retention": mechanism,
+                    "validation_scope": "parse_and_required_kind_backbone",
+                    "symbol_resolution": "not_performed",
                 }
                 validation_path.write_text(
                     json.dumps(validation, ensure_ascii=False, indent=2) + "\n",
@@ -249,23 +264,37 @@ class FusionPipeline(MutationPipeline):
 
     def mutate_file(self, source_path: Path, output_dir: Path, mutator: SnippetMutator, options: PipelineOptions) -> dict[str, object]:
         from .fusion import (
-            EXCLUDED_ANCHORS, build_anchor_interaction_graph, cross_node_plans, group_matches,
+            EXCLUDED_ANCHORS, build_anchor_interaction_graph, cross_node_plans,
             plan_sort_key, same_node_plans,
         )
 
         if options.fusion == "off":
             return super().mutate_file(source_path, output_dir, mutator, options)
         source = source_path.read_text(encoding="utf-8", errors="replace")
-        tree, matches = self.match_source(source, source_path.name, options)
-        source_size = max(len(source.encode("utf-8")), 1)
-        eligible = [m for m in matches if (
-            tree.nodes[m.local_subtree.root_id].raw_kind not in EXCLUDED_ANCHORS
-            and m.local_subtree.end_byte > m.local_subtree.start_byte
-            and m.local_subtree.end_byte - m.local_subtree.start_byte <= options.max_host_bytes
-            and (m.local_subtree.end_byte - m.local_subtree.start_byte) / source_size <= options.max_host_fraction
-            and m.final_score >= options.min_score
-        )]
-        groups = group_matches(eligible)
+        tree = parse_java(source, source_path.name)
+        # Every pattern may report several candidate anchors, so two patterns can
+        # pair on one node (principle 9) or on interacting nodes (principle 10).
+        groups = self.matcher.match_anchors(
+            tree,
+            candidates_per_pattern=options.anchor_candidates,
+            prefilter_limit=options.prefilter_limit,
+            top_k=options.top_k,
+            min_score=options.min_score,
+            query_language_feature=options.query_language_feature,
+            query_phases=options.query_phases,
+            query_diagnostic=options.query_diagnostic,
+            max_span_bytes=options.max_host_bytes,
+            max_span_fraction=options.max_host_fraction,
+        )
+        groups = {
+            root: [m for m in group if (
+                tree.nodes[m.local_subtree.root_id].raw_kind not in EXCLUDED_ANCHORS
+                and m.local_subtree.end_byte > m.local_subtree.start_byte
+                and m.final_score >= options.min_score
+            )]
+            for root, group in groups.items()
+        }
+        groups = {root: group for root, group in groups.items() if group}
         edges = build_anchor_interaction_graph(tree, groups, options.anchor_limit) if options.fusion in {"cross", "both"} else []
         plans = same_node_plans(tree, groups, options.fusion_pairs) if options.fusion in {"same", "both"} else []
         if options.fusion in {"cross", "both"}:
@@ -367,6 +396,7 @@ class FusionPipeline(MutationPipeline):
             historical_source=material["extracted_code"],
             abstract_raw_kinds=match.pattern.abstract_raw_kinds,
             abstract_canonical_kinds=match.pattern.abstract_canonical_kinds,
+            enclosing_context=enclosing_skeleton(tree, match.local_subtree.root_id),
         )
 
     def _fusion_request(self, tree: JavaSyntaxTree, plan: FusionPlan) -> FusionMutationRequest:
@@ -439,24 +469,69 @@ def replacement_regions(spans: list[tuple[int, int]], fragments: list[str]) -> l
     return regions
 
 
+# Kinds that occur in almost every Java fragment; they never carry a historical
+# anomaly mechanism by themselves, so retention checks must look past them.
+TRIVIAL_KINDS = {
+    "IDENTIFIER", "MODIFIERS", "BLOCK", "EXPRESSION_STATEMENT", "PARENTHESIZED",
+    "METHOD", "CLASS", "METHOD_INVOCATION", "RETURN", "EMPTY_STATEMENT",
+    "COMPILATION_UNIT", "IMPORT", "PACKAGE",
+}
+
+
+def mechanism_retention(
+    mutated: JavaSyntaxTree,
+    region: tuple[int, int],
+    required_kinds: Iterable[str],
+    other_required: Iterable[str] = (),
+) -> dict:
+    """Kind-level mechanism check inside one replacement region of the composed file.
+
+    A preserved mechanism means the fragment keeps >=60% of the pattern's required
+    kinds AND at least one backbone kind that is distinctive of this pattern
+    (required, non-trivial, and not shared with a co-fused pattern).
+    """
+    start, end = region
+    fragment = mutated.snippet(start, end)
+    start += len(fragment[:len(fragment) - len(fragment.lstrip())].encode("utf-8"))
+    end -= len(fragment[len(fragment.rstrip()):].encode("utf-8"))
+    kinds = {n.raw_kind for n in mutated.nodes.values() if n.start_byte >= start and n.end_byte <= end}
+    required = set(required_kinds)
+    backbone = required - TRIVIAL_KINDS
+    exclusive = backbone - set(other_required)
+    fraction = len(required & kinds) / len(required) if required else 0.0
+    if exclusive:
+        backbone_check, present = "exclusive_backbone", bool(exclusive & kinds)
+    elif backbone:
+        backbone_check, present = "shared_backbone", bool(backbone & kinds)
+    else:
+        backbone_check, present = "total_retention", fraction >= 0.9
+    return {
+        "region": [start, end],
+        "required_kinds": sorted(required),
+        "missing_kinds": sorted(required - kinds),
+        "backbone_kinds": sorted(backbone),
+        "exclusive_kinds": sorted(exclusive),
+        "backbone_check": backbone_check,
+        "backbone_present": present,
+        "retention": round(fraction, 6),
+        "preserved": fraction >= 0.6 and present,
+    }
+
+
 def validate_fusion(original: JavaSyntaxTree, mutated: JavaSyntaxTree, plan: FusionPlan, regions: list[tuple[int, int]]) -> dict:
     from .fusion import syntactic_role
 
     retention, roles = [], []
     no_errors = True
     for index, match in enumerate((plan.match_1, plan.match_2)):
-        start, end = regions[index if plan.fusion_kind == "cross_node" else 0]
-        fragment = mutated.snippet(start, end)
-        start += len(fragment[:len(fragment) - len(fragment.lstrip())].encode("utf-8"))
-        end -= len(fragment[len(fragment.rstrip()):].encode("utf-8"))
+        region = regions[index if plan.fusion_kind == "cross_node" else 0]
+        other = plan.match_2 if index == 0 else plan.match_1
+        item = mechanism_retention(mutated, region, match.pattern.required_kinds, other.pattern.required_kinds)
+        item["bug_id"] = match.pattern.bug_id
+        retention.append(item)
+        start, end = item["region"]
         nodes = [n for n in mutated.nodes.values() if n.start_byte >= start and n.end_byte <= end]
         kinds = {n.raw_kind for n in nodes}
-        required = set(match.pattern.required_kinds)
-        fraction = len(required & kinds) / len(required) if required else 0.0
-        other = plan.match_2 if index == 0 else plan.match_1
-        distinctive = required - set(other.pattern.required_kinds) - {"IDENTIFIER", "MODIFIERS", "BLOCK", "EXPRESSION_STATEMENT", "PARENTHESIZED"}
-        distinctive_present = not distinctive or bool(distinctive & kinds)
-        retention.append({"bug_id": match.pattern.bug_id, "required_kinds": sorted(required), "missing_kinds": sorted(required - kinds), "distinctive_kinds": sorted(distinctive), "distinctive_backbone_present": distinctive_present, "retention": fraction, "preserved": fraction >= 0.6 and distinctive_present})
         roots = [n for n in nodes if n.start_byte == start and n.end_byte == end]
         expected_role = syntactic_role(original.nodes[match.local_subtree.root_id].raw_kind)
         roles.append(any(syntactic_role(n.raw_kind) == expected_role for n in roots))
@@ -474,6 +549,42 @@ def validate_fusion(original: JavaSyntaxTree, mutated: JavaSyntaxTree, plan: Fus
         "validation_scope": "parse_and_required_kind_backbones",
         "symbol_resolution": "not_performed",
     }
+
+
+def enclosing_skeleton(tree: JavaSyntaxTree, root_id: int, max_bytes: int = 1000) -> str:
+    """Signature-only view of the anchor's enclosing type and method (no bodies).
+
+    Gives the mutator model the declared methods and fields around the anchor so
+    adapted identifiers can actually resolve, without leaking the whole file.
+    """
+    lines: list[str] = []
+    ancestors = tree.ancestors(root_id)
+    type_id = next(
+        (n for n in reversed(ancestors) if tree.nodes[n].raw_kind in {"CLASS", "INTERFACE", "ENUM", "RECORD"}),
+        None,
+    )
+    method_id = next((n for n in reversed(ancestors) if tree.nodes[n].raw_kind == "METHOD"), None)
+    if type_id is not None:
+        type_node = tree.nodes[type_id]
+        type_text = tree.snippet(type_node.start_byte, type_node.end_byte)
+        lines.append(type_text.split("{", 1)[0].strip() + " { ... }")
+        for child_id in type_node.child_ids:
+            child = tree.nodes[child_id]
+            if child.raw_kind == "METHOD":
+                child_text = tree.snippet(child.start_byte, child.end_byte)
+                signature = child_text.split("{", 1)[0].strip()
+                lines.append("    " + signature if signature.endswith(";") else "    " + signature + " { ... }")
+            elif child.raw_kind == "VARIABLE":
+                child_text = tree.snippet(child.start_byte, child.end_byte)
+                lines.append("    " + child_text.split("=", 1)[0].strip() + ";")
+    if method_id is not None:
+        method_text = tree.snippet(tree.nodes[method_id].start_byte, tree.nodes[method_id].end_byte)
+        signature = method_text.split("{", 1)[0].strip()
+        lines.append(signature if signature.endswith((";", "}")) else signature + " { ... }")
+    text = "\n".join(lines)
+    if len(text.encode("utf-8")) > max_bytes:
+        text = text[:max_bytes] + " ..."
+    return text
 
 
 def aggregate_fusion_stats(summaries: Iterable[dict]) -> dict:

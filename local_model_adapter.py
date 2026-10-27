@@ -37,6 +37,7 @@ def build_subtree_prompt(request: dict[str, Any]) -> str:
             "extracted_code": str(report.get("extracted_code") or ""),
         },
         "match_score": request.get("match_score"),
+        "enclosing_context": str(request.get("enclosing_context") or ""),
     }
     if not payload["host_subtree"].strip():
         raise ValueError("request has no host_subtree")
@@ -47,7 +48,8 @@ def build_subtree_prompt(request: dict[str, Any]) -> str:
         "You mutate exactly one Java AST subtree for javac compiler fuzzing.\n"
         "Use the historical bug report, complete historical reproducer, anomaly subtree, and L/A/P/D "
         "pattern to transfer the anomaly structure into host_subtree. Adapt identifiers, types, and "
-        "syntax to the host context. Preserve the syntactic role of host_subtree.\n"
+        "syntax to the host context; use enclosing_context (nearby declared signatures) to keep "
+        "adapted identifiers resolvable. Preserve the syntactic role of host_subtree.\n"
         "Return exactly one JSON object with one key, mutated_subtree. Its value must contain only the "
         "replacement Java subtree. Do not return imports, a surrounding class, a complete Java file, "
         "Markdown, or an explanation.\n\n"
@@ -62,7 +64,7 @@ def build_fusion_prompt(request: dict[str, Any]) -> str:
         "protocol_version", "fusion_kind", "fusion_role", "instruction", "bug_id_1", "bug_id_2",
         "host_subtree_1", "host_subtree_2", "pattern_1", "pattern_2",
         "historical_subtree_1", "historical_subtree_2", "historical_report_1", "historical_report_2",
-        "match_score_1", "match_score_2", "bridging_context", "edge_evidence",
+        "match_score_1", "match_score_2", "bridging_context", "edge_evidence", "enclosing_context",
     )
     payload = {key: request[key] for key in fields if key in request}
     if not payload.get("host_subtree_1") or not payload.get("historical_subtree_1") or not payload.get("historical_subtree_2"):
@@ -74,8 +76,8 @@ def build_fusion_prompt(request: dict[str, Any]) -> str:
     return (
         "You fuse TWO historical javac anomaly patterns into one host context.\n"
         "Keep BOTH anomaly mechanisms recognizable. Preserve each host subtree's syntactic role. "
-        "Adapt identifiers and types to the supplied hosts and bridging context. "
-        "Follow fusion_role and its directed instruction; preserve the interaction edge.\n"
+        "Adapt identifiers and types to the supplied hosts, the enclosing_context signatures, and the "
+        "bridging context. Follow fusion_role and its directed instruction; preserve the interaction edge.\n"
         f"Return exactly one JSON object shaped as {output}. "
         "Each value contains only replacement Java subtree code. Return no imports, complete file, "
         "Markdown, or explanation.\n\nFusion request:\n"

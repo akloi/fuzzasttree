@@ -260,6 +260,7 @@ PYTHONPATH=ast_mutation python -m astsubtree mutate path/to/Seed.java \
   --fusion both \
   --fusion-pairs 4 \
   --anchor-limit 6 \
+  --anchor-candidates 3 \
   --fusion-budget 0.4 \
   --max-outputs 5 \
   --output-dir ast_mutation/astsubtree/runs/fusion
@@ -309,10 +310,23 @@ For cross-anchor fusion, return both snippets in one response:
 The composer applies disjoint UTF-8 spans from right to left. Validation reparses
 the complete result, checks each replacement's syntactic role, and requires at
 least 60% of each pattern's required node kinds within its replacement region.
-When a pattern has distinctive non-scaffolding kinds, at least one must survive;
-shared identifiers alone cannot establish two-mechanism retention. Every
-selected anchor must change. These are syntax/backbone checks; symbol binding,
-full type checking and actual bug reproduction are measured downstream.
+The retention check first subtracts a fixed set of trivial scaffolding kinds
+(`IDENTIFIER`, `BLOCK`, plain method/class declarations, bare invocations,
+returns, imports, and the like); what remains is the pattern's backbone. For a
+co-fused pattern the backbone minus the other pattern's required kinds must be
+represented by at least one node — shared scaffolding alone cannot establish
+two-mechanism retention — and the same gate applies to single-pattern outputs
+(`mutation loses the historical mechanism backbone`). Every selected anchor must
+change. These are syntax/backbone checks; symbol binding, full type checking and
+actual bug reproduction are measured downstream.
+
+Anchor selection reports `--anchor-candidates` (default 3) ranked anchors per
+pattern instead of only the best one, and applies the `--max-host-bytes` /
+`--max-host-fraction` gates inside the matcher, so oversized or whole-file
+anchors never consume top-k slots. Requests additionally carry
+`enclosing_context`: the signature-only skeleton of the anchor's enclosing type
+and method (member signatures, no bodies, bounded to ~1 KB) so adapted
+identifiers can resolve without leaking the complete host file.
 
 Each accepted fusion adds `fusion_plan.json`, with both bug traces, both match
 signatures, operation/edge evidence, score components, replacement spans and the
