@@ -1,0 +1,102 @@
+[
+  {
+    "case": "JDK-4015399__01__type_01__JDK-8333766__r007.java",
+    "seed_path": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/seedcompilable/JDK-4015399__01__type_01.java",
+    "original_matches_current_seed": true,
+    "mutation_mode": "single_pattern",
+    "checks": {
+      "original": {
+        "exit_code": 0,
+        "exception": null,
+        "repair_mode": "no_public_type",
+        "stderr_log": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/JDK-4015399__01__type_01__JDK-8333766__r007/original/stderr.log"
+      },
+      "mutated": {
+        "exit_code": 3,
+        "exception": "java.lang.StackOverflowError",
+        "repair_mode": "rename_file_to_public_type",
+        "stderr_log": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/JDK-4015399__01__type_01__JDK-8333766__r007/mutated/stderr.log"
+      }
+    }
+  },
+  {
+    "case": "JDK-4202833__Test__JDK-8267220_JDK-6468404__sibling__r018.java",
+    "seed_path": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/seedcompilable/JDK-4202833__Test.java",
+    "original_matches_current_seed": true,
+    "mutation_mode": "same_node",
+    "checks": {
+      "original": {
+        "exit_code": 0,
+        "exception": null,
+        "repair_mode": "rename_file_to_public_type",
+        "stderr_log": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/JDK-4202833__Test__JDK-8267220_JDK-6468404__sibling__r018/original/stderr.log"
+      },
+      "mutated": {
+        "exit_code": 4,
+        "exception": "java.lang.NullPointerException",
+        "repair_mode": "rename_file_to_public_type",
+        "stderr_log": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/JDK-4202833__Test__JDK-8267220_JDK-6468404__sibling__r018/mutated/stderr.log"
+      }
+    }
+  },
+  {
+    "case": "JDK-4809833__Test__JDK-8267220_JDK-8066541__sibling__r006.java",
+    "seed_path": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/seedcompilable/JDK-4809833__Test.java",
+    "original_matches_current_seed": true,
+    "mutation_mode": "same_node",
+    "checks": {
+      "original": {
+        "exit_code": 0,
+        "exception": null,
+        "repair_mode": "rename_file_to_public_type",
+        "stderr_log": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/JDK-4809833__Test__JDK-8267220_JDK-8066541__sibling__r006/original/stderr.log"
+      },
+      "mutated": {
+        "exit_code": 4,
+        "exception": "java.lang.AssertionError",
+        "repair_mode": "rename_file_to_public_type",
+        "stderr_log": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/JDK-4809833__Test__JDK-8267220_JDK-8066541__sibling__r006/mutated/stderr.log"
+      }
+    }
+  },
+  {
+    "case": "JDK-4975363__03__type_02__Test1__JDK-8066541_JDK-8267220__sibling__r013.java",
+    "seed_path": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/seedcompilable/JDK-4975363__03__type_02__Test1.java",
+    "original_matches_current_seed": true,
+    "mutation_mode": "same_node",
+    "checks": {
+      "original": {
+        "exit_code": 0,
+        "exception": null,
+        "repair_mode": "rename_file_to_public_type",
+        "stderr_log": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/JDK-4975363__03__type_02__Test1__JDK-8066541_JDK-8267220__sibling__r013/original/stderr.log"
+      },
+      "mutated": {
+        "exit_code": 4,
+        "exception": "java.lang.AssertionError",
+        "repair_mode": "rename_file_to_public_type",
+        "stderr_log": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/JDK-4975363__03__type_02__Test1__JDK-8066541_JDK-8267220__sibling__r013/mutated/stderr.log"
+      }
+    }
+  },
+  {
+    "case": "JDK-4984022__JDK-8267220_JDK-8066541__sibling__r006.java",
+    "seed_path": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/seedcompilable/JDK-4984022.java",
+    "original_matches_current_seed": true,
+    "mutation_mode": "same_node",
+    "checks": {
+      "original": {
+        "exit_code": 0,
+        "exception": null,
+        "repair_mode": "no_public_type",
+        "stderr_log": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/JDK-4984022__JDK-8267220_JDK-8066541__sibling__r006/original/stderr.log"
+      },
+      "mutated": {
+        "exit_code": 4,
+        "exception": "java.lang.AssertionError",
+        "repair_mode": "no_public_type",
+        "stderr_log": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/JDK-4984022__JDK-8267220_JDK-8066541__sibling__r006/mutated/stderr.log"
+      }
+    }
+  }
+]

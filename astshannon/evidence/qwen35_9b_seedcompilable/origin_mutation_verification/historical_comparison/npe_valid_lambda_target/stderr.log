@@ -1,0 +1,10 @@
+/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/npe_valid_lambda_target/compile/Input/Test.java:14: error: cannot find symbol
+      return (true ? bar : ((java.util.function.BooleanSupplier) (() -> { boolean x = false; return x; })));
+                     ^
+  symbol:   variable bar
+  location: class Test
+/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/npe_valid_lambda_target/compile/Input/Test.java:14: error: incompatible types: bad type in conditional expression
+      return (true ? bar : ((java.util.function.BooleanSupplier) (() -> { boolean x = false; return x; })));
+                            ^
+    BooleanSupplier cannot be converted to String
+2 errors

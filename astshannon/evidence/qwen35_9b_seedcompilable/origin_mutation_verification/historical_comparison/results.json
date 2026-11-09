@@ -1,0 +1,213 @@
+[
+  {
+    "test": "history_8333766",
+    "purpose": "Historical extracted reproducer",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/history_8333766/Input.java",
+    "exit_code": 3,
+    "exception": "java.lang.StackOverflowError",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.comp.Lower.needsProtectedAccess(Lower.java:1054)",
+      "jdk.compiler/com.sun.tools.javac.comp.Lower.access(Lower.java:1156)",
+      "jdk.compiler/com.sun.tools.javac.comp.Lower.access(Lower.java:1223)",
+      "jdk.compiler/com.sun.tools.javac.comp.Lower.makeOwnerThisN(Lower.java:1780)",
+      "jdk.compiler/com.sun.tools.javac.comp.Lower.makeOwnerThis(Lower.java:1764)",
+      "jdk.compiler/com.sun.tools.javac.comp.Lower.accessBase(Lower.java:1030)",
+      "jdk.compiler/com.sun.tools.javac.comp.Lower.access(Lower.java:1202)",
+      "jdk.compiler/com.sun.tools.javac.comp.Lower.access(Lower.java:1223)"
+    ]
+  },
+  {
+    "test": "history_8267220",
+    "purpose": "Historical extracted reproducer",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/history_8267220/Input.java",
+    "exit_code": 4,
+    "exception": "java.lang.AssertionError",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1676)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1659)",
+      "jdk.compiler/com.sun.tools.javac.code.Type.accept(Type.java:214)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$DefaultTypeVisitor.visit(Types.java:4857)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isCastable(Types.java:1650)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$7.compatible(Attr.java:3442)",
+      "jdk.compiler/com.sun.tools.javac.comp.Check.checkType(Check.java:563)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$ResultInfo.check(Attr.java:518)"
+    ]
+  },
+  {
+    "test": "history_8066541_extracted",
+    "purpose": "Historical extracted reproducer",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/history_8066541_extracted/Input.java",
+    "exit_code": 1,
+    "exception": null,
+    "top_frames": []
+  },
+  {
+    "test": "history_8066541_report_equality",
+    "purpose": "8066541 with the equality expression shown in the report description",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/history_8066541_report_equality/Input.java",
+    "exit_code": 0,
+    "exception": null,
+    "top_frames": []
+  },
+  {
+    "test": "assertion_case_3_without_8066541",
+    "purpose": "Remove stream/reduce and retain the cast-lambda conditional",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/assertion_case_3_without_8066541/Input.java",
+    "exit_code": 4,
+    "exception": "java.lang.AssertionError",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1676)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1659)",
+      "jdk.compiler/com.sun.tools.javac.code.Type.accept(Type.java:214)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$DefaultTypeVisitor.visit(Types.java:4857)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isCastable(Types.java:1650)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$7.compatible(Attr.java:3442)",
+      "jdk.compiler/com.sun.tools.javac.comp.Check.checkType(Check.java:563)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$ResultInfo.check(Attr.java:518)"
+    ]
+  },
+  {
+    "test": "assertion_case_4_without_8066541",
+    "purpose": "Remove stream/reduce and retain the cast-lambda conditional",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/assertion_case_4_without_8066541/Input.java",
+    "exit_code": 4,
+    "exception": "java.lang.AssertionError",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1676)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1659)",
+      "jdk.compiler/com.sun.tools.javac.code.Type.accept(Type.java:214)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$DefaultTypeVisitor.visit(Types.java:4857)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isCastable(Types.java:1650)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$7.compatible(Attr.java:3442)",
+      "jdk.compiler/com.sun.tools.javac.comp.Check.checkType(Check.java:563)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$ResultInfo.check(Attr.java:518)"
+    ]
+  },
+  {
+    "test": "assertion_case_5_without_8066541",
+    "purpose": "Remove stream/reduce and retain the cast-lambda conditional",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/assertion_case_5_without_8066541/Input.java",
+    "exit_code": 4,
+    "exception": "java.lang.AssertionError",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1676)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1659)",
+      "jdk.compiler/com.sun.tools.javac.code.Type.accept(Type.java:214)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$DefaultTypeVisitor.visit(Types.java:4857)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isCastable(Types.java:1650)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$7.compatible(Attr.java:3442)",
+      "jdk.compiler/com.sun.tools.javac.comp.Check.checkType(Check.java:563)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$ResultInfo.check(Attr.java:518)"
+    ]
+  },
+  {
+    "test": "npe_remove_6468404_block",
+    "purpose": "Remove the lambda-local variable/block attributed to the second pattern",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/npe_remove_6468404_block/Input.java",
+    "exit_code": 4,
+    "exception": "java.lang.NullPointerException",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.code.Types.asSuper(Types.java:2111)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$4.visitClassType(Types.java:1179)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$4.visitClassType(Types.java:1100)",
+      "jdk.compiler/com.sun.tools.javac.code.Type$ClassType.accept(Type.java:993)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$DefaultTypeVisitor.visit(Types.java:4857)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isSubtype(Types.java:1096)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isSubtype(Types.java:1067)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isCastable(Types.java:1644)"
+    ]
+  },
+  {
+    "test": "npe_cast_Double",
+    "purpose": "Change only the primitive cast target back to historical Double",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/npe_cast_Double/Input.java",
+    "exit_code": 4,
+    "exception": "java.lang.AssertionError",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1676)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1659)",
+      "jdk.compiler/com.sun.tools.javac.code.Type.accept(Type.java:214)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$DefaultTypeVisitor.visit(Types.java:4857)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isCastable(Types.java:1650)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$7.compatible(Attr.java:3442)",
+      "jdk.compiler/com.sun.tools.javac.comp.Check.checkType(Check.java:563)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$ResultInfo.check(Attr.java:518)"
+    ]
+  },
+  {
+    "test": "npe_define_bar_boolean",
+    "purpose": "Define the previously unresolved bar as boolean",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/npe_define_bar_boolean/Input.java",
+    "exit_code": 4,
+    "exception": "java.lang.NullPointerException",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.code.Types.asSuper(Types.java:2111)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$4.visitClassType(Types.java:1179)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$4.visitClassType(Types.java:1100)",
+      "jdk.compiler/com.sun.tools.javac.code.Type$ClassType.accept(Type.java:993)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$DefaultTypeVisitor.visit(Types.java:4857)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isSubtype(Types.java:1096)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isSubtype(Types.java:1067)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isCastable(Types.java:1644)"
+    ]
+  },
+  {
+    "test": "npe_define_bar_Double",
+    "purpose": "Define the previously unresolved bar as Double",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/npe_define_bar_Double/Input.java",
+    "exit_code": 4,
+    "exception": "java.lang.NullPointerException",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.code.Types.asSuper(Types.java:2111)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$4.visitClassType(Types.java:1179)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$4.visitClassType(Types.java:1100)",
+      "jdk.compiler/com.sun.tools.javac.code.Type$ClassType.accept(Type.java:993)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$DefaultTypeVisitor.visit(Types.java:4857)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isSubtype(Types.java:1096)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isSubtype(Types.java:1067)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isCastable(Types.java:1644)"
+    ]
+  },
+  {
+    "test": "npe_valid_lambda_target",
+    "purpose": "Replace the invalid primitive lambda target with a functional interface",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/npe_valid_lambda_target/Input.java",
+    "exit_code": 1,
+    "exception": null,
+    "top_frames": []
+  },
+  {
+    "test": "minimal_boolean_lambda_conditional",
+    "purpose": "Drop the original host and second-pattern structure",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/minimal_boolean_lambda_conditional/Input.java",
+    "exit_code": 4,
+    "exception": "java.lang.NullPointerException",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.code.Types.asSuper(Types.java:2111)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$4.visitClassType(Types.java:1179)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$4.visitClassType(Types.java:1100)",
+      "jdk.compiler/com.sun.tools.javac.code.Type$ClassType.accept(Type.java:993)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$DefaultTypeVisitor.visit(Types.java:4857)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isSubtype(Types.java:1096)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isSubtype(Types.java:1067)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isCastable(Types.java:1644)"
+    ]
+  },
+  {
+    "test": "minimal_Double_lambda_conditional",
+    "purpose": "Same minimal context with historical Double target",
+    "source": "/disk1/users/zengj/jdk-fuzzllm/FuzzLLMs-jdk/ast_mutation/astshannon/runs/qwen35_9b_seedcompilable/codes-compile-detect/origin_mutation_verification/historical_comparison/minimal_Double_lambda_conditional/Input.java",
+    "exit_code": 4,
+    "exception": "java.lang.AssertionError",
+    "top_frames": [
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1676)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$7.visitType(Types.java:1659)",
+      "jdk.compiler/com.sun.tools.javac.code.Type.accept(Type.java:214)",
+      "jdk.compiler/com.sun.tools.javac.code.Types$DefaultTypeVisitor.visit(Types.java:4857)",
+      "jdk.compiler/com.sun.tools.javac.code.Types.isCastable(Types.java:1650)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$7.compatible(Attr.java:3442)",
+      "jdk.compiler/com.sun.tools.javac.comp.Check.checkType(Check.java:563)",
+      "jdk.compiler/com.sun.tools.javac.comp.Attr$ResultInfo.check(Attr.java:518)"
+    ]
+  }
+]
